@@ -1,7 +1,20 @@
-#Please visit 
+#Please visit https://github.com/thetootall/Imaging/blob/master/buildMDTenvironment.ps1 for current release, issues & more
 
 Write-host "This script will invoke the necessary commands to configure your MDT environment"
 
+# Lax permissions on the share: https://deploymentresearch.com/Research/Post/613/Building-a-Windows-10-v1703-reference-image-using-MDT 
+# Check for elevation
+Write-Host "Checking for elevation"
+ 
+If (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
+    [Security.Principal.WindowsBuiltInRole] "Administrator"))
+{
+    Write-Warning "Oupps, you need to run this script from an elevated PowerShell prompt!`nPlease start the PowerShell prompt as an Administrator and re-run the script."
+    Write-Warning "Aborting script..."
+    Break
+}
+
+Write-host "Creating download folder and pulling MDT toolkit from Microsoft servers"
 $temp = "C:\temp\download"
 New-Item -Path $temp -ItemType Directory -Verbose
 $url="https://download.microsoft.com/download/3/3/9/339BE62D-B4B8-4956-B58D-73C4685FC492/MicrosoftDeploymentToolkit_x64.msi"
@@ -41,12 +54,11 @@ $wdsUtilResults | select -last 1
 # But we have a problem for access rights: https://social.technet.microsoft.com/Forums/en-US/dbff853b-3c49-4551-a4b7-4e892decef2a
 # Finding some base ACLs: https://devblogs.microsoft.com/scripting/use-powershell-to-explore-active-directory-security/
 
-# This code is still theory
+# This code is still theory on setting AD ACLs
 If ($myaclblock -eq "TRUE"){
 Set-Location AD:
 $WDSComputer = Get-ADObject -Filter 'name -like $computer' -Properties *
 (Get-Acl $WDSComputer).access | ft identityreference, accesscontroltype -AutoSize
-
 
 $rootdse = Get-ADRootDSE
 $domain = Get-ADDomain
@@ -72,12 +84,12 @@ $acl|Set-ACL $oupath
 # $wdsClientResult = wdsutil /Set-Server /AnswerClients:All
 # Set the key https://social.technet.microsoft.com/Forums/windows/en-US/f6ed133d-4029-4f45-8756-d062f34618df
 # If It does not exist, New-ItemProperty  -PropertyType String
+Write-host "Updating WDS registry keys"
 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootAnswerRequests" -Value "TRUE"
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\WDSSERVER\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootAnswerOnlyValidClients" -Value "FALSE"
 $ComputerOU = "CN=Computers,DC=ED,DC=LAN"
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\WDSSERVER\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootNewMachineOU" -value $ComputerOU
 Restart-Service WDSSERVER
-
 
 Write-host "This process is downloading files from the internet, this may take a few moments" -BackgroundColor Red -ForegroundColor White
 $invokeadk = "cmd.exe /c c:\temp\download\adksetup.exe /quiet /installpath c:\ADK /features OptionId.DeploymentTools"
@@ -105,20 +117,9 @@ $Type = 0
 $objWMI = [wmiClass] 'Win32_share'
 $objWMI.create($FolderPath, $ShareName, $Type)
 
-# Lax permissions on the share: https://deploymentresearch.com/Research/Post/613/Building-a-Windows-10-v1703-reference-image-using-MDT 
-# Check for elevation
-Write-Host "Checking for elevation"
- 
-If (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
-    [Security.Principal.WindowsBuiltInRole] "Administrator"))
-{
-    Write-Warning "Oupps, you need to run this script from an elevated PowerShell prompt!`nPlease start the PowerShell prompt as an Administrator and re-run the script."
-    Write-Warning "Aborting script..."
-    Break
-}
-
 # Configure NTFS Permissions for the MDT Build Lab deployment share
-# icacls $Folderpath /grant '"VIAMONSTRA\MDT_BA":(OI)(CI)(RX)'
+# icacls $Folderpath /grant '"VIAMONSTRA\MDT_BA":(OI)(CI)(RX
+Write-host "Updating folders and share permissions
 icacls $Folderpath /grant '"Administrators":(OI)(CI)(F)'
 icacls $Folderpath /grant '"SYSTEM":(OI)(CI)(F)'
 icacls "$FolderPath\Captures" /grant '"Everyone":(OI)(CI)(M)'
@@ -126,7 +127,6 @@ icacls "$FolderPath\Captures" /grant '"Everyone":(OI)(CI)(M)'
 # Configure Sharing Permissions for the MDT Build Lab deployment share
 Grant-SmbShareAccess -Name $ShareName -AccountName "EVERYONE" -AccessRight Change -Force
 Revoke-SmbShareAccess -Name $ShareName -AccountName "CREATOR OWNER" -Force
-
 
 # Create PS Drive for MDT
 new-PSDrive -Name "DS001" -PSProvider "MDTProvider" -Root "$FolderPath" -Description "$MDTDescription" -NetworkPath "$NetPath"  -Verbose | add-MDTPersistentDrive -Verbose
@@ -160,7 +160,9 @@ new-item -path "DS001:\Selection Profiles" -enable "True" -Name "WinPE x64" -Com
 # Import Windows 10 ISO
 # Building the Path https://stackoverflow.com/questions/16452901/how-do-i-get-the-drive-letter-for-the-iso-i-mounted-with-mount-diskimage
 # Reference: https://social.technet.microsoft.com/Forums/en-US/c242828b-58f5-4cc0-87e9-244f8e264b87/powershell-mdt-cmdlet-doesnt-seem-to-work-properly-when-invoked-as-background-job-or-maybe-its-me?forum=mdt
-$mountResult = Mount-DiskImage "C:\Windows 10 1803\Windows 10 1803 Updated 1-10-19.iso" -PassThru
+$ISOpath = Read-host "Please enter the path of your Windows Build ISO"
+#In my lab it was located at: "C:\Windows 10 1803\Windows 10 1803 Updated 1-10-19.iso"
+$mountResult = Mount-DiskImage $ISOPath -PassThru
 $mountResult | Get-Volume
 $driveLetter = ($mountResult | Get-Volume).DriveLetter
 #$WimDestPath = "\\" + $computer + "\" + $driveletter + "$\sources\install.wim"
@@ -170,18 +172,19 @@ $DeploySharePath = $FolderPath
 #$WimDestPath = "D:\install.wim"
 $DestFolder = $OSBuild
 
-Import-Module Microsoft.BDD.PSSnapIn
-New-PSDrive -Name "DS001" -PSProvider MDTProvider -Root $DeploySharePath -Scope Global
+Write-host "Importing the OS image into MDT"
 Import-MDToperatingsystem -path "DS001:\Operating Systems\$DestFolder" -SourceFile $WimDestPath -DestinationFolder $DestFolder -Verbose
 $OSCatalog = "DS001:\Operating Systems\$DestFolder\Windows 10 Enterprise in Windows 10 1803 install.wim"
 Get-MDTOperatingSystemCatalog -ImageFile $oscatalog -Index 1
 
 # Force an Update for the deployment Share
+Write-host "Updating the MDT Deployment share, please wait...." -BackgroundColor White -ForeGroundColor Black
 Update-MDTDeploymentShare -Path "DS001:" -Force -Verbose
 
 # Import the boot images from MDT
+Write-host "Pushing MDF imagines to WDS, please wait...." -BackgroundColor White -ForeGroundColor Black
 Import-WdsBootImage -Path $folderpath\Boot\LiteTouchPE_x64.wim -NewImageName "MDT Production x64" –SkipVerify -Verbose
 Import-WdsBootImage -Path $folderpath\Boot\LiteTouchPE_x86.wim -NewImageName "MDT Production x86" –SkipVerify -Verbose
 
 # Create the task sequence
-import-mdttasksequence -path "DS001:\Task Sequences\Windows 10" -Name "Install Windows 10" -Template "Client.xml" -Comments "" -ID "TS001" -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10 1803\Windows 10 Enterprise in Windows 10 1803 install.wim" -FullName "Windows User" -OrgName "Edmentum" -HomePage "about:blank" -AdminPassword "Password19" -Verbose
+import-mdttasksequence -path "DS001:\Task Sequences\Windows 10" -Name "Install Windows 10" -Template "Client.xml" -Comments "" -ID "TS001" -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10 1803\Windows 10 Enterprise in Windows 10 1803 install.wim" -FullName "Windows User" -OrgName "Test" -HomePage "about:blank" -AdminPassword "Password" -Verbose
