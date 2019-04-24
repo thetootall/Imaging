@@ -1,5 +1,28 @@
 #Please visit https://github.com/thetootall/Imaging/blob/master/buildMDTenvironment.ps1 for current release, issues & more
 
+#menu code: https://4sysops.com/archives/how-to-build-an-interactive-menu-with-powershell/
+function Show-Menu
+{
+    param (
+        [string]$Title = 'MDT Deployment'
+    )
+    Clear-Host
+    Write-Host "================ $Title ================"
+    
+    Write-Host "1: Press '1' to downloading the Windows ADK and MDT bits."
+    Write-Host "2: Press '2' to perform the MDT install."
+    Write-Host "3: Press '3' to create the MDT folder structure."
+    Write-Host "4: Press '4' to do absolutely nothing."
+    Write-Host "5: Press '5' to initialize the MDT PS drive."
+    Write-Host "6: Press '6' to create the MDT folder structure."
+    Write-Host "7: Press '7' to update the Windows 10 boot WIM."
+    Write-Host "8: Press '8' to refresh the MDT boot images."
+    Write-Host "9: Press '9' to create a new Windows 10 deployment task sequence."
+    Write-Host "Q: Press 'Q' to quit."
+}
+
+
+
 Write-host "This script will invoke the necessary commands to configure your MDT environment"
 
 # Lax permissions on the share: https://deploymentresearch.com/Research/Post/613/Building-a-Windows-10-v1703-reference-image-using-MDT 
@@ -13,6 +36,16 @@ If (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
     Write-Warning "Aborting script..."
     Break
 }
+
+
+do
+ {
+Show-Menu –Title 'MDT Deployment'
+ $selection = Read-Host "Please make a selection"
+ switch ($selection)
+ {
+    '1' {
+
 
 Write-host "Creating download folder and pulling MDT toolkit from Microsoft servers"
 $temp = "C:\temp\download"
@@ -41,6 +74,9 @@ Start-Process "iexplore" "https://go.microsoft.com/fwlink/?linkid=2022233"
 
 Write-host "Once these files are downloaded you are ready to continue"
 Pause
+
+}
+    '2' {
 
 # This installs Windows Deployment Service
 Import-Module ServerManager
@@ -99,6 +135,8 @@ Write-host "This process is downloading files from the internet, this may take a
 $invokeadkaddon = "cmd.exe /c c:\temp\download\adkwinpesetup.exe"
 Invoke-Expression $invokeadkaddon
 
+}
+    '3' {
 # Initialize
 Add-PSSnapIn Microsoft.BDD.PSSnapIn -ErrorAction SilentlyContinue
 
@@ -119,7 +157,7 @@ $objWMI.create($FolderPath, $ShareName, $Type)
 
 # Configure NTFS Permissions for the MDT Build Lab deployment share
 # icacls $Folderpath /grant '"VIAMONSTRA\MDT_BA":(OI)(CI)(RX
-Write-host "Updating folders and share permissions
+Write-host "Updating folders and share permissions"
 icacls $Folderpath /grant '"Administrators":(OI)(CI)(F)'
 icacls $Folderpath /grant '"SYSTEM":(OI)(CI)(F)'
 icacls "$FolderPath\Captures" /grant '"Everyone":(OI)(CI)(M)'
@@ -128,9 +166,27 @@ icacls "$FolderPath\Captures" /grant '"Everyone":(OI)(CI)(M)'
 Grant-SmbShareAccess -Name $ShareName -AccountName "EVERYONE" -AccessRight Change -Force
 Revoke-SmbShareAccess -Name $ShareName -AccountName "CREATOR OWNER" -Force
 
+}
+    '5' {
+
+Write-host "Loading MDT Virtual Drive as DS001" -BackgroundColor White -ForegroundColor Black
+# Initialize
+Add-PSSnapIn Microsoft.BDD.PSSnapIn -ErrorAction SilentlyContinue
+
+# Constriants
+$Computer = get-content env:computername
+$FolderPath = "C:\DeploymentShare"
+$ShareName = "DeploymentShare$"
+$NetPath = "\\$Computer\DeploymentShare$"
+$MDTDescription = "Deployment Share"
+
 # Create PS Drive for MDT
 new-PSDrive -Name "DS001" -PSProvider "MDTProvider" -Root "$FolderPath" -Description "$MDTDescription" -NetworkPath "$NetPath"  -Verbose | add-MDTPersistentDrive -Verbose
 
+}
+    '6' {
+
+Write-host "Creating Folder Structure in MDT, please wait..." -BackgroundColor White -ForegroundColor Black
 # Create OS Folders
 $OSBUILD = "Windows 10 1803"
 new-item -path "DS001:\Operating Systems" -enable "True" -Name $OSBUILD -Comments "" -ItemType "folder" -Verbose
@@ -157,6 +213,9 @@ new-item -path "DS001:\Applications" -enable "True" -Name "Core Applications" -C
 new-item -path "DS001:\Selection Profiles" -enable "True" -Name "WinPE x86" -Comments "" -Definition "<SelectionProfile><Include path=`"Out-of-Box Drivers\WinPE x86`" #/></SelectionProfile>" -ReadOnly "False" -Verbose
 new-item -path "DS001:\Selection Profiles" -enable "True" -Name "WinPE x64" -Comments "" -Definition "<SelectionProfile><Include path=`"Out-of-Box Drivers\WinPE x64`" #/></SelectionProfile>" -ReadOnly "False" -Verbose
 
+}
+    '7' {
+Write-host "Processing new Windows ISO import" -BackgroundColor White -ForegroundColor Black
 # Import Windows 10 ISO
 # Building the Path https://stackoverflow.com/questions/16452901/how-do-i-get-the-drive-letter-for-the-iso-i-mounted-with-mount-diskimage
 # Reference: https://social.technet.microsoft.com/Forums/en-US/c242828b-58f5-4cc0-87e9-244f8e264b87/powershell-mdt-cmdlet-doesnt-seem-to-work-properly-when-invoked-as-background-job-or-maybe-its-me?forum=mdt
@@ -177,14 +236,30 @@ Import-MDToperatingsystem -path "DS001:\Operating Systems\$DestFolder" -SourceFi
 $OSCatalog = "DS001:\Operating Systems\$DestFolder\Windows 10 Enterprise in Windows 10 1803 install.wim"
 Get-MDTOperatingSystemCatalog -ImageFile $oscatalog -Index 1
 
+}
+    '8' {
 # Force an Update for the deployment Share
 Write-host "Updating the MDT Deployment share, please wait...." -BackgroundColor White -ForeGroundColor Black
 Update-MDTDeploymentShare -Path "DS001:" -Force -Verbose
 
 # Import the boot images from MDT
-Write-host "Pushing MDF imagines to WDS, please wait...." -BackgroundColor White -ForeGroundColor Black
+Write-host "Removing old MDT images to WDS, please wait...." -BackgroundColor White -ForeGroundColor Black
+Get-WdsBootImage | Remove-WdsBootImage
+Write-host "Updating the x64 boot image" -BackgroundColor White -ForegroundColor Black
 Import-WdsBootImage -Path $folderpath\Boot\LiteTouchPE_x64.wim -NewImageName "MDT Production x64" –SkipVerify -Verbose
-Import-WdsBootImage -Path $folderpath\Boot\LiteTouchPE_x86.wim -NewImageName "MDT Production x86" –SkipVerify -Verbose
+Write-host "We are not using the x86 boot image in our environment, skipping" -BackgroundColor Yellow -ForegroundColor Black
+#Import-WdsBootImage -Path $folderpath\Boot\LiteTouchPE_x86.wim -NewImageName "MDT Production x86" –SkipVerify -Verbose
+#If we want to get more granular with cleanup, this takes it an extra step
+#https://powershellpr0mpt.com/2017/01/04/automagically-update-your-mdt-boot-image/
 
+}
+    '9' {
 # Create the task sequence
 import-mdttasksequence -path "DS001:\Task Sequences\Windows 10" -Name "Install Windows 10" -Template "Client.xml" -Comments "" -ID "TS001" -Version "1.0" -OperatingSystemPath "DS001:\Operating Systems\Windows 10 1803\Windows 10 Enterprise in Windows 10 1803 install.wim" -FullName "Windows User" -OrgName "Test" -HomePage "about:blank" -AdminPassword "Password" -Verbose
+
+}
+
+     }
+     pause
+ }
+ until ($selection -eq 'q')
