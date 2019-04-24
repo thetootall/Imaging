@@ -47,14 +47,17 @@ Show-Menu –Title 'MDT Deployment'
     '1' {
 
 
-Write-host "Creating download folder and pulling MDT toolkit from Microsoft servers"
+Write-host "Creating download folder and pulling MDT toolkit from Microsoft servers" -BackgroundColor White -ForegroundColor Black
 $temp = "C:\temp\download"
 New-Item -Path $temp -ItemType Directory -Verbose
 $url="https://download.microsoft.com/download/3/3/9/339BE62D-B4B8-4956-B58D-73C4685FC492/MicrosoftDeploymentToolkit_x64.msi"
 Start-BitsTransfer -Source $url -Destination $temp
 
+$isMDTinstalled = ((gp HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*).DisplayName -Match "Microsoft Deployment Toolkit").Length -gt 0
+If ($isMDTinstalled -eq "False"){
 $invokecmd = "cmd.exe /c start /wait msiexec.exe /I C:\temp\download\MicrosoftDeploymentToolkit_x64.msi /qb /norestart"
 Invoke-Expression $invokecmd
+}Else{Write-host "MDT is already installed" -BackgroundColor White -ForegroundColor Red}
 
 # WAIK Docs
 # https://docs.microsoft.com/en-us/windows-hardware/get-started/adk-install
@@ -85,12 +88,7 @@ add-WindowsFeature wds,wds-deployment, wds-transport, wds-adminpack
 $wdsUtilResults = wdsutil /initialize-server /remInst:"C:\RemoteInstall"
 $wdsUtilResults | select -last 1
 
-# We need to fix some AD permissions
-# We're prestaging machines similar to SCCM AD: https://scadminsblog.wordpress.com/2016/11/27/assigning-permissions-to-sccm-domain-join-account-with-powershell/
-# But we have a problem for access rights: https://social.technet.microsoft.com/Forums/en-US/dbff853b-3c49-4551-a4b7-4e892decef2a
-# Finding some base ACLs: https://devblogs.microsoft.com/scripting/use-powershell-to-explore-active-directory-security/
-
-# This code is still theory on setting AD ACLs
+# This code is for looking at AD ACLs, which we do not need when running as Domain Admin
 If ($myaclblock -eq "TRUE"){
 Set-Location AD:
 $WDSComputer = Get-ADObject -Filter 'name -like $computer' -Properties *
@@ -117,23 +115,30 @@ $acl|Set-ACL $oupath
 }
 
 # WE cannotrun wdsutil configuration due to Access is denied errors
-# $wdsClientResult = wdsutil /Set-Server /AnswerClients:All
+Write-Host "Updating Active Directory to allow for PXE in DHCP. If Access is Denied error occurs, please rerun with Domain Admin credentials" -BackgroundColor White -ForegroundColor Black
+wdsutil /Set-Server /AnswerClients:All
 # Set the key https://social.technet.microsoft.com/Forums/windows/en-US/f6ed133d-4029-4f45-8756-d062f34618df
 # If It does not exist, New-ItemProperty  -PropertyType String
 Write-host "Updating WDS registry keys"
 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootAnswerRequests" -Value "TRUE"
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\WDSSERVER\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootAnswerOnlyValidClients" -Value "FALSE"
-$ComputerOU = "CN=Computers,DC=ED,DC=LAN"
+$ComputerOU = Read-Host "Please enter the Distinguished Name of the OU where staged computers in WDS should reside"
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\WDSSERVER\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootNewMachineOU" -value $ComputerOU
 Restart-Service WDSSERVER
 
+$isWAIKinstalled = ((gp HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*).DisplayName -Match "Windows Assessment").Length -gt 0
+If ($isWAIKinstalled -eq "False"){
 Write-host "This process is downloading files from the internet, this may take a few moments" -BackgroundColor Red -ForegroundColor White
 $invokeadk = "cmd.exe /c c:\temp\download\adksetup.exe /quiet /installpath c:\ADK /features OptionId.DeploymentTools"
 Invoke-Expression $invokeadk
+}Else{Write-host "The WAIK is already installed" -BackgroundColor White -ForegroundColor Black}
 
+$isWAIKPXEinstalled = ((gp HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*).DisplayName -Contains "Windows Preinstallation Environment Add-on").Length -gt 0
+If ($isWAIKPXEinstalled -eq "False"){
 Write-host "This process is downloading files from the internet, this may take a few moments" -BackgroundColor Red -ForegroundColor White
 $invokeadkaddon = "cmd.exe /c c:\temp\download\adkwinpesetup.exe"
 Invoke-Expression $invokeadkaddon
+}Else{Write-host "The WAIK PXE Add-on is already installed" -BackgroundColor White -ForegroundColor Black}
 
 }
     '3' {
