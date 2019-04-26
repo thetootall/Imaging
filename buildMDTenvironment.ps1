@@ -124,6 +124,8 @@ Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Provid
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\WDSSERVER\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootAnswerOnlyValidClients" -Value "FALSE"
 $ComputerOU = Read-Host "Please enter the Distinguished Name of the OU where staged computers in WDS should reside"
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\WDSSERVER\Providers\WDSPXE\Providers\BINLSVC" -Name "netbootNewMachineOU" -value $ComputerOU
+# Fix issues with Variable Window Extension - https://support.microsoft.com/en-us/help/4489893/windows-8-1-update-kb4489893
+Set-ItemProperty -Path "Registry::\HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WDSServer\Providers\WDSTFTP" -Name "EnableVariableWindowExtension" -Value 0 -PropertyType DWord -Force
 Restart-Service WDSSERVER
 
 $isWAIKinstalled = ((gp HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*).DisplayName -Match "Windows Assessment").Length -gt 0
